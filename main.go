@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	brokers   = flag.String("brokers", os.Getenv("KAFKA_BROKERS"), "The Kafka brokers to connect to, as a comma separated list")
-	topic     = flag.String("topic", os.Getenv("KAFKA_TOPIC"), "The Kafka brokers to connect to, as a comma separated list")
-	verbose   = flag.Bool("verbose", false, "Turn on Sarama logging")
-	verifySsl = flag.Bool("verify", true, "Verify SSL certificates chain")
+	brokers          = flag.String("brokers", os.Getenv("KAFKA_BROKERS"), "The Kafka brokers to connect to, as a comma separated list")
+	topic            = flag.String("topic", os.Getenv("KAFKA_TOPIC"), "The Kafka brokers to connect to, as a comma separated list")
+	verbose          = flag.Bool("verbose", false, "Turn on Sarama logging")
+	verifySsl        = flag.Bool("verify", true, "Verify SSL certificates chain")
+	productstatusUrl = flag.String("productstatus", os.Getenv("PRODUCTSTATUS_URL"), "URL to the Productstatus web service")
 )
 
 // Productstatus message types
