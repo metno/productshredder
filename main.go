@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -17,10 +20,60 @@ var (
 	verifySsl = flag.Bool("verify", true, "Verify SSL certificates chain")
 )
 
-type Server struct {
-	Consumer sarama.Consumer
+// Productstatus message types
+const (
+	UNKNOWN = iota
+	HEARTBEAT
+	RESOURCE
+	EXPIRED
+)
+
+// msgTypes maps string message types to integer constants
+var msgTypes = map[string]int{
+	"heartbeat": HEARTBEAT,
+	"resource":  RESOURCE,
+	"expired":   EXPIRED,
 }
 
+// Message holds a normalized Productstatus message.
+type Message struct {
+	Message_id        string
+	Message_timestamp string
+	Product           string
+	Resource          string
+	Service_backend   string
+	Type              string
+	Uri               string
+	Uris              []string
+	Version           []int
+}
+
+// T returns the type of Productstatus message.
+func (m *Message) T() int {
+	return msgTypes[m.Type]
+}
+
+// readMessage parses a JSON marshalled Productstatus message, and returns a Message struct.
+func readMessage(kafkaMessage []byte) (*Message, error) {
+	var err error
+
+	message := &Message{
+		Version: make([]int, 0),
+		Uris:    make([]string, 0),
+	}
+	reader := bytes.NewReader(kafkaMessage)
+	decoder := json.NewDecoder(reader)
+
+	// decode an array value (Message)
+	err = decoder.Decode(message)
+	if err != nil {
+		return message, fmt.Errorf("while decoding body: %s", err)
+	}
+
+	return message, nil
+}
+
+// newConsumer returns a Kafka consumer.
 func newConsumer(brokerList []string) (sarama.Consumer, error) {
 	config := sarama.NewConfig()
 	config.Net.TLS.Enable = true
@@ -46,24 +99,26 @@ func main() {
 	}
 
 	brokerList := strings.Split(*brokers, ",")
-	log.Printf("Kafka brokers: %s", strings.Join(brokerList, ", "))
+	fmt.Printf("Kafka brokers: %s", strings.Join(brokerList, ", "))
 
 	consumer, err := newConsumer(brokerList)
 	if err != nil {
-		log.Fatalf("Error while creating consumer: %s", err)
+		fmt.Printf("Error while creating consumer: %s", err)
+		os.Exit(1)
 	}
 
-	partition, err := consumer.ConsumePartition(*topic, 0, sarama.OffsetOldest)
+	partition, err := consumer.ConsumePartition(*topic, 0, sarama.OffsetNewest)
 	if err != nil {
-		log.Fatalf("Error while creating partition consumer: %s", err)
+		fmt.Printf("Error while creating partition consumer: %s", err)
+		os.Exit(1)
 	}
 
 	defer func() {
 		if err := partition.Close(); err != nil {
-			log.Println("Failed to close partition consumer", err)
+			fmt.Println("Failed to close partition consumer", err)
 		}
 		if err := consumer.Close(); err != nil {
-			log.Println("Failed to close consumer", err)
+			fmt.Println("Failed to close consumer", err)
 		}
 	}()
 
@@ -77,14 +132,24 @@ ConsumerLoop:
 	for {
 		select {
 		case msg := <-partition.Messages():
-			log.Printf("Consumed message offset %d\n", msg.Offset)
-			value := string(msg.Value)
-			log.Printf("%+v\n", value)
-			consumed++
+			fmt.Printf("[%9d] ", msg.Offset)
+			message, err := readMessage(msg.Value)
+			if err != nil {
+				fmt.Printf("Error decoding message: %s\n", err)
+				continue
+			}
+			switch message.T() {
+			case HEARTBEAT:
+				fmt.Printf("Heartbeat, server time is %s\n", message.Message_timestamp)
+			case RESOURCE:
+				fmt.Printf("Resource of type '%s' at '%s'\n", message.Resource, message.Uri)
+			case EXPIRED:
+				fmt.Printf("Expire event for %d data instances on product '%s', service backend '%s'\n", len(message.Uris), message.Product, message.Service_backend)
+			}
 		case <-signals:
 			break ConsumerLoop
 		}
 	}
 
-	log.Printf("Consumed: %d\n", consumed)
+	fmt.Printf("Consumed: %d\n", consumed)
 }
