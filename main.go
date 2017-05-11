@@ -137,6 +137,16 @@ func main() {
 	signal.Notify(signals, os.Interrupt)
 	signal.Notify(signals, os.Kill)
 
+	// Message and error queues
+	errors := make(chan error, 1024)
+	messages := make(chan *Message, 1024)
+	dataInstances := make(chan *productstatus.DataInstance)
+
+	// Start processing coroutines
+	go handleExpired(productstatusClient, messages, dataInstances, errors)
+	go handleDelete(productstatusClient, dataInstances, errors)
+
+	// Consume messages from Kafka and post them to handling functions
 	consumed := 0
 ConsumerLoop:
 	for {
@@ -155,13 +165,12 @@ ConsumerLoop:
 				fmt.Printf("Resource of type '%s' at '%s'\n", message.Resource, message.Uri)
 			case EXPIRED:
 				fmt.Printf("Expire event for %d data instances on product '%s', service backend '%s'\n", len(message.Uris), message.Product, message.Service_backend)
-				go func() {
-					err := handleExpired(productstatusClient, message)
-					if err != nil {
-						fmt.Printf("ERROR while handling expired message: %s\n", err)
-					}
-				}()
+				messages <- message
 			}
+
+		case err := <-errors:
+			fmt.Printf("ERROR: %s", err)
+
 		case <-signals:
 			break ConsumerLoop
 		}
@@ -170,28 +179,40 @@ ConsumerLoop:
 	fmt.Printf("Consumed: %d\n", consumed)
 }
 
-func handleExpired(c *productstatus.Client, m *Message) error {
-	product, err := c.GetProduct(m.Product)
-	if err != nil {
-		return err
-	}
+func handleDelete(c *productstatus.Client, dataInstances chan *productstatus.DataInstance, errors chan error) {
+	for {
+		dataInstance := <-dataInstances
 
-	serviceBackend, err := c.GetServiceBackend(m.Service_backend)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Product '%s' has %d expired data instances on service backend '%s':\n", product.Name, len(m.Uris), serviceBackend.Name)
-
-	dataInstances := make([]*productstatus.DataInstance, 0)
-	for _, uri := range m.Uris {
-		dataInstance, err := c.GetDataInstance(uri)
-		if err != nil {
-			return err
-		}
-		dataInstances = append(dataInstances, dataInstance)
 		fmt.Printf("- [expired: %s] %s\n", dataInstance.Expires, dataInstance.Url)
 	}
+}
 
-	return nil
+func handleExpired(c *productstatus.Client, messages chan *Message, dataInstances chan *productstatus.DataInstance, errors chan error) {
+	for {
+		m := <-messages
+
+		/*
+			product, err := c.GetProduct(m.Product)
+			if err != nil {
+				errors <- err
+				return
+			}
+
+			serviceBackend, err := c.GetServiceBackend(m.Service_backend)
+			if err != nil {
+				errors <- err
+				return
+			}
+		*/
+
+		for _, uri := range m.Uris {
+			dataInstance, err := c.GetDataInstance(uri)
+			if err != nil {
+				errors <- err
+				continue
+			}
+
+			dataInstances <- dataInstance
+		}
+	}
 }
