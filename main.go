@@ -155,10 +155,12 @@ ConsumerLoop:
 				fmt.Printf("Resource of type '%s' at '%s'\n", message.Resource, message.Uri)
 			case EXPIRED:
 				fmt.Printf("Expire event for %d data instances on product '%s', service backend '%s'\n", len(message.Uris), message.Product, message.Service_backend)
-				err := handleExpired(productstatusClient, message)
-				if err != nil {
-					fmt.Printf("ERROR while handling expired message: %s\n", err)
-				}
+				go func() {
+					err := handleExpired(productstatusClient, message)
+					if err != nil {
+						fmt.Printf("ERROR while handling expired message: %s\n", err)
+					}
+				}()
 			}
 		case <-signals:
 			break ConsumerLoop
@@ -173,13 +175,23 @@ func handleExpired(c *productstatus.Client, m *Message) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Product: %s\n", product.Name)
 
 	serviceBackend, err := c.GetServiceBackend(m.Service_backend)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Service backend: %s\n", serviceBackend.Name)
+
+	fmt.Printf("Product '%s' has %d expired data instances on service backend '%s':\n", product.Name, len(m.Uris), serviceBackend.Name)
+
+	dataInstances := make([]*productstatus.DataInstance, 0)
+	for _, uri := range m.Uris {
+		dataInstance, err := c.GetDataInstance(uri)
+		if err != nil {
+			return err
+		}
+		dataInstances = append(dataInstances, dataInstance)
+		fmt.Printf("- [expired: %s] %s\n", dataInstance.Expires, dataInstance.Url)
+	}
 
 	return nil
 }

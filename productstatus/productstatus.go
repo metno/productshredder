@@ -30,6 +30,7 @@ type Resource interface{}
 
 // resourceTypes contains mappings of strings to constructors for various resource types.
 var resourceTypes = map[string]func() Resource{
+	"datainstance":   NewDataInstance,
 	"product":        NewProduct,
 	"servicebackend": NewServiceBackend,
 }
