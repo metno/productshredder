@@ -11,14 +11,16 @@ import (
 	"strings"
 
 	"github.com/Shopify/sarama"
+	"github.com/metno/productshredder/productstatus"
 )
 
 var (
 	brokers          = flag.String("brokers", os.Getenv("KAFKA_BROKERS"), "The Kafka brokers to connect to, as a comma separated list")
 	topic            = flag.String("topic", os.Getenv("KAFKA_TOPIC"), "The Kafka brokers to connect to, as a comma separated list")
+	productstatusUrl = flag.String("productstatus", os.Getenv("PRODUCTSTATUS_URL"), "URL to the Productstatus web service")
 	verbose          = flag.Bool("verbose", false, "Turn on Sarama logging")
 	verifySsl        = flag.Bool("verify", true, "Verify SSL certificates chain")
-	productstatusUrl = flag.String("productstatus", os.Getenv("PRODUCTSTATUS_URL"), "URL to the Productstatus web service")
+	offset           = flag.Int64("offset", sarama.OffsetNewest, "Kafka message offset to start reading from")
 )
 
 // Productstatus message types
@@ -99,6 +101,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	productstatusClient, err := productstatus.New(*productstatusUrl)
+	if err != nil {
+		fmt.Printf("Error while creating Productstatus client: %s\n", err)
+		os.Exit(1)
+	}
+	productstatusClient.Get("/api/v1/")
+
 	brokerList := strings.Split(*brokers, ",")
 	fmt.Printf("Kafka brokers: %s", strings.Join(brokerList, ", "))
 
@@ -108,9 +117,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	partition, err := consumer.ConsumePartition(*topic, 0, sarama.OffsetNewest)
+	partition, err := consumer.ConsumePartition(*topic, 0, *offset)
 	if err != nil {
-		fmt.Printf("Error while creating partition consumer: %s", err)
+		fmt.Printf("Error while creating partition consumer: %s\n", err)
 		os.Exit(1)
 	}
 
@@ -146,6 +155,10 @@ ConsumerLoop:
 				fmt.Printf("Resource of type '%s' at '%s'\n", message.Resource, message.Uri)
 			case EXPIRED:
 				fmt.Printf("Expire event for %d data instances on product '%s', service backend '%s'\n", len(message.Uris), message.Product, message.Service_backend)
+				err := handleExpired(productstatusClient, message)
+				if err != nil {
+					fmt.Printf("ERROR while handling expired message: %s\n", err)
+				}
 			}
 		case <-signals:
 			break ConsumerLoop
@@ -153,4 +166,13 @@ ConsumerLoop:
 	}
 
 	fmt.Printf("Consumed: %d\n", consumed)
+}
+
+func handleExpired(c *productstatus.Client, m *Message) error {
+	product, err := c.GetResource(m.Product)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Product: %+v\n", product)
+	return nil
 }
