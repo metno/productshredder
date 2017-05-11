@@ -17,6 +17,7 @@ import (
 var (
 	brokers          = flag.String("brokers", os.Getenv("KAFKA_BROKERS"), "The Kafka brokers to connect to, as a comma separated list")
 	topic            = flag.String("topic", os.Getenv("KAFKA_TOPIC"), "The Kafka brokers to connect to, as a comma separated list")
+	ssl              = flag.Bool("ssl", false, "Use SSL for Kafka connection")
 	productstatusUrl = flag.String("productstatus", os.Getenv("PRODUCTSTATUS_URL"), "URL to the Productstatus web service")
 	verbose          = flag.Bool("verbose", false, "Turn on Sarama logging")
 	verifySsl        = flag.Bool("verify", true, "Verify SSL certificates chain")
@@ -79,7 +80,7 @@ func readMessage(kafkaMessage []byte) (*Message, error) {
 // newConsumer returns a Kafka consumer.
 func newConsumer(brokerList []string) (sarama.Consumer, error) {
 	config := sarama.NewConfig()
-	config.Net.TLS.Enable = true
+	config.Net.TLS.Enable = *ssl
 	config.Net.KeepAlive = 30
 	config.Consumer.Return.Errors = false // FIXME
 	consumer, err := sarama.NewConsumer(brokerList, config)
