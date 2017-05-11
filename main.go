@@ -169,10 +169,17 @@ ConsumerLoop:
 }
 
 func handleExpired(c *productstatus.Client, m *Message) error {
-	product, err := c.GetResource(m.Product)
+	product, err := c.GetProduct(m.Product)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Product: %+v\n", product)
+	fmt.Printf("Product: %s\n", product.Name)
+
+	serviceBackend, err := c.GetServiceBackend(m.Service_backend)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Service backend: %s\n", serviceBackend.Name)
+
 	return nil
 }

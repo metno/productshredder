@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 
 	resty "gopkg.in/resty.v0"
 )
@@ -24,11 +25,13 @@ type resource struct {
 	Modified     string
 }
 
+// Resource represents any Productstatus resource.
 type Resource interface{}
 
-// Product represents a Productstatus product resource.
-type Product struct {
-	resource
+// resourceTypes contains mappings of strings to constructors for various resource types.
+var resourceTypes = map[string]func() Resource{
+	"product":        NewProduct,
+	"servicebackend": NewServiceBackend,
 }
 
 // New returns a new Productstatus client
@@ -48,9 +51,13 @@ func New(rawurl string) (*Client, error) {
 	}, nil
 }
 
-// readMessage parses a JSON marshalled Productstatus message, and returns a Message struct.
-func unmarshalResource(data []byte) (Resource, error) {
-	r := &Product{}
+// unmarshalResource parses a JSON marshalled Productstatus message, and returns a Message struct.
+func unmarshalResource(t string, data []byte) (Resource, error) {
+	ctor, ok := resourceTypes[t]
+	if !ok {
+		return nil, fmt.Errorf("Resource type '%s' is not supported by this library", t)
+	}
+	r := ctor()
 
 	reader := bytes.NewReader(data)
 	decoder := json.NewDecoder(reader)
@@ -61,12 +68,15 @@ func unmarshalResource(data []byte) (Resource, error) {
 
 	return r, nil
 }
-func (c *Client) GetResource(uri string) (Resource, error) {
-	data, err := c.Get(uri)
-	if err != nil {
-		return nil, err
+
+// resourceType determines the resource type from a resource URI.
+func resourceType(uri string) (string, error) {
+	uri = strings.Trim(uri, "/")
+	path := strings.Split(uri, "/")
+	if len(path) != 4 {
+		return "", fmt.Errorf("Cannot determine resource type from URI")
 	}
-	return unmarshalResource(data)
+	return path[2], nil
 }
 
 // Get takes a URI, queries the server, checks the response code, and returns a
@@ -82,6 +92,19 @@ func (c *Client) Get(uri string) ([]byte, error) {
 		return nil, fmt.Errorf("Got unexpected response code %s", resp.Status())
 	}
 	return resp.Body(), nil
+}
+
+// GetResource takes a URI, queries Productstatus, and returns a Resource.
+func (c *Client) GetResource(uri string) (Resource, error) {
+	data, err := c.Get(uri)
+	if err != nil {
+		return nil, err
+	}
+	t, err := resourceType(uri)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalResource(t, data)
 }
 
 // BasePath returns the start URI of all requests, currently at API version 1.
