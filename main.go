@@ -17,15 +17,17 @@ import (
 )
 
 var (
+	apiKey           = flag.String("apikey", os.Getenv("PRODUCTSTATUS_API_KEY"), "Productstatus API key")
 	brokers          = flag.String("brokers", os.Getenv("KAFKA_BROKERS"), "The Kafka brokers to connect to, as a comma separated list")
-	topic            = flag.String("topic", os.Getenv("KAFKA_TOPIC"), "The Kafka brokers to connect to, as a comma separated list")
-	ssl              = flag.Bool("ssl", false, "Use SSL for Kafka connection")
+	offset           = flag.Int64("offset", sarama.OffsetNewest, "Kafka message offset to start reading from")
+	products         = flag.String("products", "", "Which products backends to process expired messages for")
 	productstatusUrl = flag.String("productstatus", os.Getenv("PRODUCTSTATUS_URL"), "URL to the Productstatus web service")
-	username         = flag.String("username", os.Getenv("PRODUCTSTATUS_URL"), "Productstatus username")
-	apiKey           = flag.String("apikey", os.Getenv("PRODUCTSTATUS_URL"), "Productstatus API key")
+	serviceBackends  = flag.String("servicebackends", "", "Which service backends to process expired messages for")
+	ssl              = flag.Bool("ssl", false, "Use SSL for Kafka connection")
+	topic            = flag.String("topic", os.Getenv("KAFKA_TOPIC"), "The Kafka brokers to connect to, as a comma separated list")
+	username         = flag.String("username", os.Getenv("PRODUCTSTATUS_USERNAME"), "Productstatus username")
 	verbose          = flag.Bool("verbose", false, "Turn on Sarama logging")
 	verifySsl        = flag.Bool("verify", true, "Verify SSL certificates chain")
-	offset           = flag.Int64("offset", sarama.OffsetNewest, "Kafka message offset to start reading from")
 )
 
 // Productstatus message types
@@ -92,6 +94,19 @@ func newConsumer(brokerList []string) (sarama.Consumer, error) {
 		return nil, err
 	}
 	return consumer, nil
+}
+
+// inSlice returns true if the given string is in the list, or if the list is empty.
+func inSlice(s string, slice []string) bool {
+	if len(slice) == 0 {
+		return true
+	}
+	for _, t := range slice {
+		if s == t {
+			return true
+		}
+	}
+	return false
 }
 
 func main() {
@@ -168,6 +183,13 @@ func main() {
 		}
 	}()
 
+	// Only delete DataInstances belonging in this list (if list is non-empty)
+	ffunc := func(r rune) bool {
+		return r == ','
+	}
+	backendUUIDs := strings.FieldsFunc(*serviceBackends, ffunc)
+	productUUIDs := strings.FieldsFunc(*products, ffunc)
+
 	// Consume messages from Kafka and post them to handling functions
 	consumed := 0
 ConsumerLoop:
@@ -187,6 +209,14 @@ ConsumerLoop:
 				fmt.Printf("Resource of type '%s' at '%s'\n", message.Resource, message.Uri)
 			case EXPIRED:
 				fmt.Printf("Expire event for %d data instances on product '%s', service backend '%s'\n", len(message.Uris), message.Product, message.Service_backend)
+				if !inSlice(message.Product, productUUIDs) {
+					fmt.Printf("Expired event filtered out because it doesn't have the correct Product UUID.\n")
+					continue
+				}
+				if !inSlice(message.Service_backend, backendUUIDs) {
+					fmt.Printf("Expired event filtered out because it doesn't have the correct ServiceBackend UUID.\n")
+					continue
+				}
 				messages <- message
 			}
 
@@ -261,28 +291,12 @@ func handleDelete(dataInstance *productstatus.DataInstance, patch chan *products
 
 // handleExpired reads an expired message, and queues all its DataInstance resources for deletion.
 func handleExpired(c *productstatus.Client, m *Message, dataInstances chan *productstatus.DataInstance) error {
-	/*
-		product, err := c.GetProduct(m.Product)
-		if err != nil {
-			errors <- err
-			return
-		}
-
-		serviceBackend, err := c.GetServiceBackend(m.Service_backend)
-		if err != nil {
-			errors <- err
-			return
-		}
-	*/
-
 	for _, uri := range m.Uris {
 		dataInstance, err := c.GetDataInstance(uri)
 		if err != nil {
 			return err
 		}
-
 		dataInstances <- dataInstance
 	}
-
 	return nil
 }
