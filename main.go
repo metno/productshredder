@@ -146,8 +146,18 @@ func main() {
 	dataInstances := make(chan *productstatus.DataInstance)
 
 	// Start processing coroutines
-	go handleExpired(productstatusClient, messages, dataInstances, errors)
-	go handleDelete(productstatusClient, dataInstances, errors)
+	go func() {
+		for {
+			m := <-messages
+			errors <- handleExpired(productstatusClient, m, dataInstances)
+		}
+	}()
+	go func() {
+		for {
+			dataInstance := <-dataInstances
+			errors <- handleDelete(dataInstance)
+		}
+	}()
 
 	// Consume messages from Kafka and post them to handling functions
 	consumed := 0
@@ -172,7 +182,9 @@ ConsumerLoop:
 			}
 
 		case err := <-errors:
-			fmt.Printf("%s\n", err)
+			if err != nil {
+				fmt.Printf("%s\n", err)
+			}
 
 		case <-signals:
 			break ConsumerLoop
@@ -205,57 +217,50 @@ func rm(path string) error {
 	return err
 }
 
-func handleDelete(c *productstatus.Client, dataInstances chan *productstatus.DataInstance, errors chan error) {
-	for {
-		dataInstance := <-dataInstances
-
-		url, err := url.Parse(dataInstance.Url)
-		if err != nil {
-			errors <- fmt.Errorf("%s: error while parsing DataInstance URL: %s", dataInstance.Url, err)
-			continue
-		}
-
-		if url.Scheme != "file" {
-			errors <- fmt.Errorf("%s: productshredder can only delete files with URL scheme 'file'", dataInstance.Url)
-			continue
-		}
-
-		err = rm(url.Path)
-		if err != nil {
-			errors <- fmt.Errorf("Failed to delete '%s': %s", url.Path, err)
-			continue
-		}
-
-		fmt.Printf("Deleted: '%s'\n", url.Path)
+// handleDelete physically removes the file pointed to by a DataInstance.
+func handleDelete(dataInstance *productstatus.DataInstance) error {
+	url, err := url.Parse(dataInstance.Url)
+	if err != nil {
+		return fmt.Errorf("%s: error while parsing DataInstance URL: %s", dataInstance.Url, err)
 	}
+
+	if url.Scheme != "file" {
+		return fmt.Errorf("%s: productshredder can only delete files with URL scheme 'file'", dataInstance.Url)
+	}
+
+	err = rm(url.Path)
+	if err != nil {
+		return fmt.Errorf("Failed to delete '%s': %s", url.Path, err)
+	}
+
+	fmt.Printf("Deleted: '%s'\n", url.Path)
+
+	return nil
 }
 
-func handleExpired(c *productstatus.Client, messages chan *Message, dataInstances chan *productstatus.DataInstance, errors chan error) {
-	for {
-		m := <-messages
-
-		/*
-			product, err := c.GetProduct(m.Product)
-			if err != nil {
-				errors <- err
-				return
-			}
-
-			serviceBackend, err := c.GetServiceBackend(m.Service_backend)
-			if err != nil {
-				errors <- err
-				return
-			}
-		*/
-
-		for _, uri := range m.Uris {
-			dataInstance, err := c.GetDataInstance(uri)
-			if err != nil {
-				errors <- err
-				continue
-			}
-
-			dataInstances <- dataInstance
+func handleExpired(c *productstatus.Client, m *Message, dataInstances chan *productstatus.DataInstance) error {
+	/*
+		product, err := c.GetProduct(m.Product)
+		if err != nil {
+			errors <- err
+			return
 		}
+
+		serviceBackend, err := c.GetServiceBackend(m.Service_backend)
+		if err != nil {
+			errors <- err
+			return
+		}
+	*/
+
+	for _, uri := range m.Uris {
+		dataInstance, err := c.GetDataInstance(uri)
+		if err != nil {
+			return err
+		}
+
+		dataInstances <- dataInstance
 	}
+
+	return nil
 }
