@@ -6,7 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 
@@ -170,7 +172,7 @@ ConsumerLoop:
 			}
 
 		case err := <-errors:
-			fmt.Printf("ERROR: %s", err)
+			fmt.Printf("%s\n", err)
 
 		case <-signals:
 			break ConsumerLoop
@@ -180,11 +182,51 @@ ConsumerLoop:
 	fmt.Printf("Consumed: %d\n", consumed)
 }
 
+// rm removes files from physical media using the 'rm' shell command.
+func rm(path string) error {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	cmd := exec.Command("rm", "-v", path)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err == nil {
+		return err
+	}
+
+	switch err.(type) {
+	case *exec.ExitError:
+		msg := strings.Trim(stderr.String(), " \n")
+		return fmt.Errorf("%s: %s", err, msg)
+	}
+
+	return err
+}
+
 func handleDelete(c *productstatus.Client, dataInstances chan *productstatus.DataInstance, errors chan error) {
 	for {
 		dataInstance := <-dataInstances
 
-		fmt.Printf("- [expired: %s] %s\n", dataInstance.Expires, dataInstance.Url)
+		url, err := url.Parse(dataInstance.Url)
+		if err != nil {
+			errors <- fmt.Errorf("%s: error while parsing DataInstance URL: %s", dataInstance.Url, err)
+			continue
+		}
+
+		if url.Scheme != "file" {
+			errors <- fmt.Errorf("%s: productshredder can only delete files with URL scheme 'file'", dataInstance.Url)
+			continue
+		}
+
+		err = rm(url.Path)
+		if err != nil {
+			errors <- fmt.Errorf("Failed to delete '%s': %s", url.Path, err)
+			continue
+		}
+
+		fmt.Printf("Deleted: '%s'\n", url.Path)
 	}
 }
 
