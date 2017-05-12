@@ -21,6 +21,8 @@ var (
 	topic            = flag.String("topic", os.Getenv("KAFKA_TOPIC"), "The Kafka brokers to connect to, as a comma separated list")
 	ssl              = flag.Bool("ssl", false, "Use SSL for Kafka connection")
 	productstatusUrl = flag.String("productstatus", os.Getenv("PRODUCTSTATUS_URL"), "URL to the Productstatus web service")
+	username         = flag.String("username", os.Getenv("PRODUCTSTATUS_URL"), "Productstatus username")
+	apiKey           = flag.String("apikey", os.Getenv("PRODUCTSTATUS_URL"), "Productstatus API key")
 	verbose          = flag.Bool("verbose", false, "Turn on Sarama logging")
 	verifySsl        = flag.Bool("verify", true, "Verify SSL certificates chain")
 	offset           = flag.Int64("offset", sarama.OffsetNewest, "Kafka message offset to start reading from")
@@ -104,7 +106,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	productstatusClient, err := productstatus.New(*productstatusUrl)
+	productstatusClient, err := productstatus.New(*productstatusUrl, *username, *apiKey)
 	if err != nil {
 		fmt.Printf("Error while creating Productstatus client: %s\n", err)
 		os.Exit(1)
@@ -143,7 +145,8 @@ func main() {
 	// Message and error queues
 	errors := make(chan error, 1024)
 	messages := make(chan *Message, 1024)
-	dataInstances := make(chan *productstatus.DataInstance)
+	dataInstances := make(chan *productstatus.DataInstance, 1024)
+	patches := make(chan *productstatus.DataInstance, 1024)
 
 	// Start processing coroutines
 	go func() {
@@ -155,7 +158,13 @@ func main() {
 	go func() {
 		for {
 			dataInstance := <-dataInstances
-			errors <- handleDelete(dataInstance)
+			errors <- handleDelete(dataInstance, patches)
+		}
+	}()
+	go func() {
+		for {
+			dataInstance := <-patches
+			errors <- handlePatch(productstatusClient, dataInstance)
 		}
 	}()
 
@@ -199,7 +208,7 @@ func rm(path string) error {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	cmd := exec.Command("rm", "-v", path)
+	cmd := exec.Command("rm", "-fv", path)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -217,8 +226,18 @@ func rm(path string) error {
 	return err
 }
 
+// handlePatch updates a DataInstance resource remotely, marking it as deleted.
+func handlePatch(c *productstatus.Client, dataInstance *productstatus.DataInstance) error {
+	err := c.DeleteResource(dataInstance)
+	if err != nil {
+		return fmt.Errorf("Unable to mark resource '%s' as deleted: %s", dataInstance.Resource_uri, err)
+	}
+	fmt.Printf("Resource '%s' has been marked as deleted in Productstatus.\n", dataInstance.Resource_uri)
+	return nil
+}
+
 // handleDelete physically removes the file pointed to by a DataInstance.
-func handleDelete(dataInstance *productstatus.DataInstance) error {
+func handleDelete(dataInstance *productstatus.DataInstance, patch chan *productstatus.DataInstance) error {
 	url, err := url.Parse(dataInstance.Url)
 	if err != nil {
 		return fmt.Errorf("%s: error while parsing DataInstance URL: %s", dataInstance.Url, err)
@@ -235,9 +254,12 @@ func handleDelete(dataInstance *productstatus.DataInstance) error {
 
 	fmt.Printf("Deleted: '%s'\n", url.Path)
 
+	patch <- dataInstance
+
 	return nil
 }
 
+// handleExpired reads an expired message, and queues all its DataInstance resources for deletion.
 func handleExpired(c *productstatus.Client, m *Message, dataInstances chan *productstatus.DataInstance) error {
 	/*
 		product, err := c.GetProduct(m.Product)

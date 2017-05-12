@@ -12,7 +12,9 @@ import (
 
 // Client represents a Productstatus API client.
 type Client struct {
-	url *url.URL
+	url      *url.URL
+	username string
+	apiKey   string
 }
 
 // resource contains fields common to all Productstatus resources.
@@ -26,7 +28,14 @@ type resource struct {
 }
 
 // Resource represents any Productstatus resource.
-type Resource interface{}
+type Resource interface {
+	URI() string
+}
+
+// URI implements Resource.
+func (r *resource) URI() string {
+	return r.Resource_uri
+}
 
 // resourceTypes contains mappings of strings to constructors for various resource types.
 var resourceTypes = map[string]func() Resource{
@@ -36,7 +45,7 @@ var resourceTypes = map[string]func() Resource{
 }
 
 // New returns a new Productstatus client
-func New(rawurl string) (*Client, error) {
+func New(rawurl string, username string, apiKey string) (*Client, error) {
 	url, err := url.Parse(rawurl)
 	if err != nil {
 		return nil, err
@@ -48,7 +57,9 @@ func New(rawurl string) (*Client, error) {
 		return nil, fmt.Errorf("Missing host from URL")
 	}
 	return &Client{
-		url: url,
+		url:      url,
+		username: username,
+		apiKey:   apiKey,
 	}, nil
 }
 
@@ -80,11 +91,24 @@ func resourceType(uri string) (string, error) {
 	return path[2], nil
 }
 
-// Get takes a URI, queries the server, checks the response code, and returns a
+// credentials returns the Productstatus username and API key as query parameters.
+func (c *Client) credentials() map[string]string {
+	return map[string]string{
+		"username": c.username,
+		"api_key":  c.apiKey,
+	}
+}
+
+// makeUrl takes a path and returns a canonical URL.
+func (c *Client) makeUrl(path string) string {
+	c.url.Path = path
+	return c.url.String()
+}
+
+// Get takes a path, queries the server, checks the response code, and returns a
 // byte slice with the object body.
-func (c *Client) Get(uri string) ([]byte, error) {
-	c.url.Path = uri
-	url := c.url.String()
+func (c *Client) Get(path string) ([]byte, error) {
+	url := c.makeUrl(path)
 	resp, err := resty.R().Get(url)
 	if err != nil {
 		return nil, err
@@ -106,6 +130,23 @@ func (c *Client) GetResource(uri string) (Resource, error) {
 		return nil, err
 	}
 	return unmarshalResource(t, data)
+}
+
+// DeleteResource marks a Resource as deleted through a PATCH request.
+func (c *Client) DeleteResource(r Resource) error {
+	url := c.makeUrl(r.URI())
+	resp, err := resty.R().
+		SetQueryParams(c.credentials()).
+		SetBody(map[string]interface{}{"deleted": true}).
+		Patch(url)
+	if err != nil {
+		return err
+	}
+	code := resp.StatusCode()
+	if code >= 200 && code < 300 {
+		return nil
+	}
+	return fmt.Errorf("Got unexpected response code %s", resp.Status())
 }
 
 // BasePath returns the start URI of all requests, currently at API version 1.
