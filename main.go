@@ -260,15 +260,16 @@ func rm(path string) error {
 
 // handlePatch updates a DataInstance resource remotely, marking it as deleted.
 func handlePatch(c *productstatus.Client, dataInstance *productstatus.DataInstance) error {
+	prefix := ""
 	if *dryRun {
-		fmt.Printf("[DRY-RUN] ")
+		prefix = "[DRY-RUN] "
 	} else {
 		err := c.DeleteResource(dataInstance)
 		if err != nil {
 			return fmt.Errorf("Unable to mark resource '%s' as deleted: %s", dataInstance.Resource_uri, err)
 		}
 	}
-	log.Printf("Resource '%s' has been marked as deleted in Productstatus.\n", dataInstance.Resource_uri)
+	log.Printf("%sResource '%s' has been marked as deleted in Productstatus.\n", prefix, dataInstance.Resource_uri)
 	return nil
 }
 
@@ -283,8 +284,9 @@ func handleDelete(dataInstance *productstatus.DataInstance, patch chan *products
 		return fmt.Errorf("%s: productshredder can only delete files with URL scheme 'file'", dataInstance.Url)
 	}
 
+	prefix := ""
 	if *dryRun {
-		fmt.Printf("[DRY-RUN] ")
+		prefix = "[DRY-RUN] "
 	} else {
 		err = rm(url.Path)
 		if err != nil {
@@ -292,7 +294,7 @@ func handleDelete(dataInstance *productstatus.DataInstance, patch chan *products
 		}
 	}
 
-	log.Printf("Deleted: '%s'\n", url.Path)
+	log.Printf("%sDeleted: '%s'\n", prefix, url.Path)
 
 	patch <- dataInstance
 
