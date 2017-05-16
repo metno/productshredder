@@ -203,19 +203,20 @@ ConsumerLoop:
 				log.Printf("Error decoding message: %s\n", err)
 				continue
 			}
+
 			switch message.T() {
 			case HEARTBEAT:
-				log.Printf("Heartbeat, server time is %s\n", message.Message_timestamp)
+				log.Printf("Message_id: %s, Heartbeat, server time is %s\n", message.Message_id, message.Message_timestamp)
 			case RESOURCE:
-				log.Printf("Resource of type '%s' at '%s'\n", message.Resource, message.Uri)
+				log.Printf("Message_id: %s, Resource of type '%s' at '%s'\n", message.Message_id, message.Resource, message.Uri)
 			case EXPIRED:
-				log.Printf("Expire event for %d data instances on product '%s', service backend '%s'\n", len(message.Uris), message.Product, message.Service_backend)
+				log.Printf("Message_id: %s, Expire event for %d data instances on product '%s', service backend '%s'\n", message.Message_id, len(message.Uris), message.Product, message.Service_backend)
 				if !inSlice(message.Product, productUUIDs) {
-					log.Printf("Expired event filtered out because it doesn't have the correct Product UUID.\n")
+					log.Printf("Message_id: %s, Expired event filtered out because it doesn't have the correct Product UUID.\n", message.Message_id)
 					continue
 				}
 				if !inSlice(message.Service_backend, backendUUIDs) {
-					log.Printf("Expired event filtered out because it doesn't have the correct ServiceBackend UUID.\n")
+					log.Printf("Message_id: %s, Expired event filtered out because it doesn't have the correct ServiceBackend UUID.\n", message.Message_id)
 					continue
 				}
 				messages <- message
