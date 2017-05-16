@@ -19,7 +19,7 @@ import (
 var (
 	apiKey           = flag.String("apikey", os.Getenv("PRODUCTSTATUS_API_KEY"), "Productstatus API key")
 	brokers          = flag.String("brokers", os.Getenv("KAFKA_BROKERS"), "The Kafka brokers to connect to, as a comma separated list")
-	dryRun           = flag.Bool("dryrun", false, "Disable all write operations")
+	dryRun           = flag.Bool("dry-run", false, "Disable all write operations")
 	offset           = flag.Int64("offset", sarama.OffsetNewest, "Kafka message offset to start reading from")
 	products         = flag.String("products", "", "Which products backends to process expired messages for")
 	productstatusUrl = flag.String("productstatus", os.Getenv("PRODUCTSTATUS_URL"), "URL to the Productstatus web service")
