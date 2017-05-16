@@ -113,6 +113,7 @@ func inSlice(s string, slice []string) bool {
 func main() {
 	flag.Parse()
 
+	log.SetPrefix("[productscredder] ")
 	if *verbose {
 		sarama.Logger = log.New(os.Stdout, "[sarama] ", log.LstdFlags)
 	}
@@ -124,32 +125,32 @@ func main() {
 
 	productstatusClient, err := productstatus.New(*productstatusUrl, *username, *apiKey)
 	if err != nil {
-		fmt.Printf("Error while creating Productstatus client: %s\n", err)
+		log.Printf("Error while creating Productstatus client: %s\n", err)
 		os.Exit(1)
 	}
 	productstatusClient.Get("/api/v1/")
 
 	brokerList := strings.Split(*brokers, ",")
-	fmt.Printf("Kafka brokers: %s", strings.Join(brokerList, ", "))
+	log.Printf("Kafka brokers: %s", strings.Join(brokerList, ", "))
 
 	consumer, err := newConsumer(brokerList)
 	if err != nil {
-		fmt.Printf("Error while creating consumer: %s", err)
+		log.Printf("Error while creating consumer: %s", err)
 		os.Exit(1)
 	}
 
 	partition, err := consumer.ConsumePartition(*topic, 0, *offset)
 	if err != nil {
-		fmt.Printf("Error while creating partition consumer: %s\n", err)
+		log.Printf("Error while creating partition consumer: %s\n", err)
 		os.Exit(1)
 	}
 
 	defer func() {
 		if err := partition.Close(); err != nil {
-			fmt.Println("Failed to close partition consumer", err)
+			log.Println("Failed to close partition consumer", err)
 		}
 		if err := consumer.Close(); err != nil {
-			fmt.Println("Failed to close consumer", err)
+			log.Println("Failed to close consumer", err)
 		}
 	}()
 
@@ -197,25 +198,25 @@ ConsumerLoop:
 	for {
 		select {
 		case msg := <-partition.Messages():
-			fmt.Printf("[%9d] ", msg.Offset)
+			log.Printf("[%9d] ", msg.Offset)
 			message, err := readMessage(msg.Value)
 			if err != nil {
-				fmt.Printf("Error decoding message: %s\n", err)
+				log.Printf("Error decoding message: %s\n", err)
 				continue
 			}
 			switch message.T() {
 			case HEARTBEAT:
-				fmt.Printf("Heartbeat, server time is %s\n", message.Message_timestamp)
+				log.Printf("Heartbeat, server time is %s\n", message.Message_timestamp)
 			case RESOURCE:
-				fmt.Printf("Resource of type '%s' at '%s'\n", message.Resource, message.Uri)
+				log.Printf("Resource of type '%s' at '%s'\n", message.Resource, message.Uri)
 			case EXPIRED:
-				fmt.Printf("Expire event for %d data instances on product '%s', service backend '%s'\n", len(message.Uris), message.Product, message.Service_backend)
+				log.Printf("Expire event for %d data instances on product '%s', service backend '%s'\n", len(message.Uris), message.Product, message.Service_backend)
 				if !inSlice(message.Product, productUUIDs) {
-					fmt.Printf("Expired event filtered out because it doesn't have the correct Product UUID.\n")
+					log.Printf("Expired event filtered out because it doesn't have the correct Product UUID.\n")
 					continue
 				}
 				if !inSlice(message.Service_backend, backendUUIDs) {
-					fmt.Printf("Expired event filtered out because it doesn't have the correct ServiceBackend UUID.\n")
+					log.Printf("Expired event filtered out because it doesn't have the correct ServiceBackend UUID.\n")
 					continue
 				}
 				messages <- message
@@ -223,7 +224,7 @@ ConsumerLoop:
 
 		case err := <-errors:
 			if err != nil {
-				fmt.Printf("%s\n", err)
+				log.Printf("%s\n", err)
 			}
 
 		case <-signals:
@@ -231,7 +232,7 @@ ConsumerLoop:
 		}
 	}
 
-	fmt.Printf("Consumed: %d\n", consumed)
+	log.Printf("Consumed: %d\n", consumed)
 }
 
 // rm removes files from physical media using the 'rm' shell command.
@@ -267,7 +268,7 @@ func handlePatch(c *productstatus.Client, dataInstance *productstatus.DataInstan
 			return fmt.Errorf("Unable to mark resource '%s' as deleted: %s", dataInstance.Resource_uri, err)
 		}
 	}
-	fmt.Printf("Resource '%s' has been marked as deleted in Productstatus.\n", dataInstance.Resource_uri)
+	log.Printf("Resource '%s' has been marked as deleted in Productstatus.\n", dataInstance.Resource_uri)
 	return nil
 }
 
@@ -291,7 +292,7 @@ func handleDelete(dataInstance *productstatus.DataInstance, patch chan *products
 		}
 	}
 
-	fmt.Printf("Deleted: '%s'\n", url.Path)
+	log.Printf("Deleted: '%s'\n", url.Path)
 
 	patch <- dataInstance
 
