@@ -30,7 +30,7 @@ productshredder \
     -servicebackends /api/v1/servicebackend/495bb3be-e327-4840-accf-afefcd411e06/ \
     -products /api/v1/product/7d3fe736-5902-44d5-a34c-86f877190523/ \
     -verbose \
-    -dryrun
+    -dry-run
 ```
 
 The example above will run Productshredder against a local Kafka instance, on
