@@ -112,7 +112,7 @@ func inSlice(s string, slice []string) bool {
 func main() {
 	flag.Parse()
 
-	log.SetPrefix("[productscredder] ")
+	log.SetPrefix("[productshredder] ")
 	if *verbose {
 		sarama.Logger = log.New(os.Stdout, "[sarama] ", log.LstdFlags)
 	}
