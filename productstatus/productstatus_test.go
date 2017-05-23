@@ -21,7 +21,7 @@ var clientTests = []struct {
 // Test that the client is properly initialized using a multitude of URLs.
 func TestNewClient(t *testing.T) {
 	for _, test := range clientTests {
-		_, err := productstatus.New(test.rawurl)
+		_, err := productstatus.New(test.rawurl, "user", "pass")
 		t.Logf(test.rawurl)
 		if test.success {
 			assert.Nil(t, err)

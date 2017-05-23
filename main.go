@@ -46,8 +46,8 @@ var msgTypes = map[string]int{
 	"expired":   EXPIRED,
 }
 
-// Message holds a normalized Productstatus message.
-type Message struct {
+// ProductstatusMessage holds a normalized Productstatus message.
+type ProductstatusMessage struct {
 	Message_id        string
 	Message_timestamp string
 	Product           string
@@ -59,23 +59,31 @@ type Message struct {
 	Version           []int
 }
 
+// Job holds the completion state of a delete event.
+type Job struct {
+	Message      *ProductstatusMessage
+	Client       *productstatus.Client
+	DataInstance *productstatus.DataInstance
+	Error        error
+}
+
 // T returns the type of Productstatus message.
-func (m *Message) T() int {
+func (m *ProductstatusMessage) T() int {
 	return msgTypes[m.Type]
 }
 
 // readMessage parses a JSON marshalled Productstatus message, and returns a Message struct.
-func readMessage(kafkaMessage []byte) (*Message, error) {
+func readMessage(kafkaMessage []byte) (*ProductstatusMessage, error) {
 	var err error
 
-	message := &Message{
+	message := &ProductstatusMessage{
 		Version: make([]int, 0),
 		Uris:    make([]string, 0),
 	}
 	reader := bytes.NewReader(kafkaMessage)
 	decoder := json.NewDecoder(reader)
 
-	// decode an array value (Message)
+	// decode an array value (ProductstatusMessage)
 	err = decoder.Decode(message)
 	if err != nil {
 		return message, fmt.Errorf("while decoding body: %s", err)
@@ -160,28 +168,35 @@ func main() {
 	signal.Notify(signals, os.Kill)
 
 	// Message and error queues
-	errors := make(chan error, 1024)
-	messages := make(chan *Message, 1024)
-	dataInstances := make(chan *productstatus.DataInstance, 1024)
-	patches := make(chan *productstatus.DataInstance, 1024)
+	jobQueue := make(chan Job, 1024)
+	finishQueue := make(chan Job, 1024)
+	deleteQueue := make(chan Job, 1024)
+	patchQueue := make(chan Job, 1024)
 
+	//
 	// Start processing coroutines
+	//
+
+	// Read from job queue, get a list of data instance objects, and pass them
+	// to the delete handler.
 	go func() {
 		for {
-			m := <-messages
-			errors <- handleExpired(productstatusClient, m, dataInstances)
+			job := <-jobQueue
+			handleExpired(job, deleteQueue, finishQueue)
+		}
+	}()
+
+	// Get deletion jobs from queue, delete files, and pass them to the patch handler.
+	go func() {
+		for {
+			job := <-deleteQueue
+			handleDelete(job, patchQueue, finishQueue)
 		}
 	}()
 	go func() {
 		for {
-			dataInstance := <-dataInstances
-			errors <- handleDelete(dataInstance, patches)
-		}
-	}()
-	go func() {
-		for {
-			dataInstance := <-patches
-			errors <- handlePatch(productstatusClient, dataInstance)
+			job := <-patchQueue
+			handlePatch(job, finishQueue)
 		}
 	}()
 
@@ -219,11 +234,15 @@ ConsumerLoop:
 					log.Printf("Expired event filtered out because it doesn't have the correct ServiceBackend UUID.\n")
 					continue
 				}
-				messages <- message
+				job := Job{
+					Message: message,
+					Client:  productstatusClient,
+				}
+				jobQueue <- job
 			}
 
-		case err := <-errors:
-			if err != nil {
+		case job := <-finishQueue:
+			if job.Error != nil {
 				log.Printf("%s\n", err)
 			}
 
@@ -258,30 +277,32 @@ func rm(path string) error {
 	return err
 }
 
-// handlePatch updates a DataInstance resource remotely, marking it as deleted.
-func handlePatch(c *productstatus.Client, dataInstance *productstatus.DataInstance) error {
-	prefix := ""
-	if *dryRun {
-		prefix = "[DRY-RUN] "
-	} else {
-		err := c.DeleteResource(dataInstance)
-		if err != nil {
-			return fmt.Errorf("Unable to mark resource '%s' as deleted: %s", dataInstance.Resource_uri, err)
+// handleExpired reads an expired message, and queues all its DataInstance resources for deletion.
+func handleExpired(job Job, deleteQueue chan Job, finishQueue chan Job) {
+	for _, uri := range job.Message.Uris {
+		job.DataInstance, job.Error = job.Client.GetDataInstance(uri)
+		if job.Error == nil {
+			deleteQueue <- job
+		} else {
+			finishQueue <- job
 		}
 	}
-	log.Printf("%sResource '%s' has been marked as deleted in Productstatus.\n", prefix, dataInstance.Resource_uri)
-	return nil
 }
 
 // handleDelete physically removes the file pointed to by a DataInstance.
-func handleDelete(dataInstance *productstatus.DataInstance, patch chan *productstatus.DataInstance) error {
-	url, err := url.Parse(dataInstance.Url)
+func handleDelete(job Job, patchQueue chan Job, finishQueue chan Job) {
+	url, err := url.Parse(job.DataInstance.Url)
+
 	if err != nil {
-		return fmt.Errorf("%s: error while parsing DataInstance URL: %s", dataInstance.Url, err)
+		job.Error = fmt.Errorf("%s: error while parsing DataInstance URL: %s", job.DataInstance.Url, err)
+		finishQueue <- job
+		return
 	}
 
 	if url.Scheme != "file" {
-		return fmt.Errorf("%s: productshredder can only delete files with URL scheme 'file'", dataInstance.Url)
+		job.Error = fmt.Errorf("%s: productshredder can only delete files with URL scheme 'file'", job.DataInstance.Url)
+		finishQueue <- job
+		return
 	}
 
 	prefix := ""
@@ -290,25 +311,30 @@ func handleDelete(dataInstance *productstatus.DataInstance, patch chan *products
 	} else {
 		err = rm(url.Path)
 		if err != nil {
-			return fmt.Errorf("Failed to delete '%s': %s", url.Path, err)
+			job.Error = fmt.Errorf("Failed to delete '%s': %s", url.Path, err)
+			finishQueue <- job
+			return
 		}
 	}
 
 	log.Printf("%sDeleted: '%s'\n", prefix, url.Path)
 
-	patch <- dataInstance
-
-	return nil
+	patchQueue <- job
 }
 
-// handleExpired reads an expired message, and queues all its DataInstance resources for deletion.
-func handleExpired(c *productstatus.Client, m *Message, dataInstances chan *productstatus.DataInstance) error {
-	for _, uri := range m.Uris {
-		dataInstance, err := c.GetDataInstance(uri)
+// handlePatch updates a DataInstance resource remotely, marking it as deleted.
+func handlePatch(job Job, finishQueue chan Job) {
+	prefix := ""
+	if *dryRun {
+		prefix = "[DRY-RUN] "
+	} else {
+		err := job.Client.DeleteResource(job.DataInstance)
 		if err != nil {
-			return err
+			job.Error = fmt.Errorf("Unable to mark resource '%s' as deleted: %s", job.DataInstance.Resource_uri, err)
+			finishQueue <- job
+			return
 		}
-		dataInstances <- dataInstance
 	}
-	return nil
+	log.Printf("%sResource '%s' has been marked as deleted in Productstatus.\n", prefix, job.DataInstance.Resource_uri)
+	finishQueue <- job
 }
