@@ -68,7 +68,9 @@ type Job struct {
 }
 
 func logJob(job Job, format string, args ...interface{}) {
-	log.Printf("Message_id: "+job.Message.Message_id+" "+format, args...)
+	message := fmt.Sprintf(format, args...)
+	message = fmt.Sprintf("[%s] %s", job.Message.Message_id, message)
+	log.Printf("%s\n", message)
 }
 
 // T returns the type of Productstatus message.
