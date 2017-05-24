@@ -231,17 +231,17 @@ ConsumerLoop:
 
 			switch message.T() {
 			case HEARTBEAT:
-				logJob(job, "Heartbeat, server time is %s\n", job.Message.Message_timestamp)
+				logJob(job, "Heartbeat, server time is %s", job.Message.Message_timestamp)
 			case RESOURCE:
-				logJob(job, "Resource of type '%s' at '%s'\n", job.Message.Resource, message.Uri)
+				logJob(job, "Resource of type '%s' at '%s'", job.Message.Resource, message.Uri)
 			case EXPIRED:
-				logJob(job, "Expire event for %d data instances on product '%s', service backend '%s'\n", len(job.Message.Uris), job.Message.Product, message.Service_backend)
+				logJob(job, "Expire event for %d data instances on product '%s', service backend '%s'", len(job.Message.Uris), job.Message.Product, message.Service_backend)
 				if !inSlice(job.Message.Product, productUUIDs) {
-					logJob(job, "Expired event filtered out because it doesn't have the correct Product UUID.\n")
+					logJob(job, "Expired event filtered out because it doesn't have the correct Product UUID.")
 					continue
 				}
 				if !inSlice(job.Message.Service_backend, backendUUIDs) {
-					logJob(job, "Expired event filtered out because it doesn't have the correct ServiceBackend UUID.\n")
+					logJob(job, "Expired event filtered out because it doesn't have the correct ServiceBackend UUID.")
 					continue
 				}
 
@@ -250,7 +250,7 @@ ConsumerLoop:
 
 		case job := <-finishQueue:
 			if job.Error != nil {
-				logJob(job, "Error: %s\n", job.Error)
+				logJob(job, "Error: %s", job.Error)
 			}
 
 		case <-signals:
@@ -324,7 +324,7 @@ func handleDelete(job Job, patchQueue chan Job, finishQueue chan Job) {
 		}
 	}
 
-	logJob(job, "%sDeleted: '%s'\n", prefix, url.Path)
+	logJob(job, "%sDeleted: '%s'", prefix, url.Path)
 
 	patchQueue <- job
 }
@@ -342,6 +342,6 @@ func handlePatch(job Job, finishQueue chan Job) {
 			return
 		}
 	}
-	logJob(job, "%sResource '%s' has been marked as deleted in Productstatus.\n", prefix, job.DataInstance.Resource_uri)
+	logJob(job, "%sResource '%s' has been marked as deleted in Productstatus.", prefix, job.DataInstance.Resource_uri)
 	finishQueue <- job
 }
