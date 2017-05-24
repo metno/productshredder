@@ -219,7 +219,6 @@ ConsumerLoop:
 	for {
 		select {
 		case msg := <-partition.Messages():
-			log.Printf("[%9d] ", msg.Offset)
 			message, err := readMessage(msg.Value)
 			if err != nil {
 				log.Printf("Error decoding message: %s\n", err)
@@ -251,7 +250,7 @@ ConsumerLoop:
 
 		case job := <-finishQueue:
 			if job.Error != nil {
-				logJob(job, "job.Error: %s\n", job.Error)
+				logJob(job, "Error: %s\n", job.Error)
 			}
 
 		case <-signals:
