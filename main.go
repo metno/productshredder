@@ -67,6 +67,10 @@ type Job struct {
 	Error        error
 }
 
+func logJob(job Job, format string, args ...interface{}) {
+	log.Printf("Message_id: "+job.Message.Message_id+" "+format, args...)
+}
+
 // T returns the type of Productstatus message.
 func (m *ProductstatusMessage) T() int {
 	return msgTypes[m.Type]
@@ -219,31 +223,33 @@ ConsumerLoop:
 				log.Printf("Error decoding message: %s\n", err)
 				continue
 			}
+			job := Job{
+				Message: message,
+				Client:  productstatusClient,
+			}
+
 			switch message.T() {
 			case HEARTBEAT:
-				log.Printf("Heartbeat, server time is %s\n", message.Message_timestamp)
+				logJob(job, "Heartbeat, server time is %s\n", job.Message.Message_timestamp)
 			case RESOURCE:
-				log.Printf("Resource of type '%s' at '%s'\n", message.Resource, message.Uri)
+				logJob(job, "Resource of type '%s' at '%s'\n", job.Message.Resource, message.Uri)
 			case EXPIRED:
-				log.Printf("Expire event for %d data instances on product '%s', service backend '%s'\n", len(message.Uris), message.Product, message.Service_backend)
-				if !inSlice(message.Product, productUUIDs) {
-					log.Printf("Expired event filtered out because it doesn't have the correct Product UUID.\n")
+				logJob(job, "Expire event for %d data instances on product '%s', service backend '%s'\n", len(job.Message.Uris), job.Message.Product, message.Service_backend)
+				if !inSlice(job.Message.Product, productUUIDs) {
+					logJob(job, "Expired event filtered out because it doesn't have the correct Product UUID.\n")
 					continue
 				}
-				if !inSlice(message.Service_backend, backendUUIDs) {
-					log.Printf("Expired event filtered out because it doesn't have the correct ServiceBackend UUID.\n")
+				if !inSlice(job.Message.Service_backend, backendUUIDs) {
+					logJob(job, "Expired event filtered out because it doesn't have the correct ServiceBackend UUID.\n")
 					continue
 				}
-				job := Job{
-					Message: message,
-					Client:  productstatusClient,
-				}
+
 				jobQueue <- job
 			}
 
 		case job := <-finishQueue:
 			if job.Error != nil {
-				log.Printf("%s\n", err)
+				logJob(job, "job.Error: %s\n", job.Error)
 			}
 
 		case <-signals:
@@ -317,7 +323,7 @@ func handleDelete(job Job, patchQueue chan Job, finishQueue chan Job) {
 		}
 	}
 
-	log.Printf("%sDeleted: '%s'\n", prefix, url.Path)
+	logJob(job, "%sDeleted: '%s'\n", prefix, url.Path)
 
 	patchQueue <- job
 }
@@ -335,6 +341,6 @@ func handlePatch(job Job, finishQueue chan Job) {
 			return
 		}
 	}
-	log.Printf("%sResource '%s' has been marked as deleted in Productstatus.\n", prefix, job.DataInstance.Resource_uri)
+	logJob(job, "%sResource '%s' has been marked as deleted in Productstatus.\n", prefix, job.DataInstance.Resource_uri)
 	finishQueue <- job
 }
